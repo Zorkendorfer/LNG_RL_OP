@@ -9,3 +9,15 @@ __pycache__/
 .coverage
 mlruns/
 .DS_Store
+mlflow.db
+
+# Generated market and simulator data
+data/nordpool/raw/*.csv
+data/synthetic/terminal_trajectories/*.parquet
+
+# Training artifacts
+runs/price_forecaster.pt
+runs/surrogate/*.pt
+!runs/surrogate/.gitkeep
+runs/agent/*
+!runs/agent/.gitkeep
