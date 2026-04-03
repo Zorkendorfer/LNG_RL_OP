@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import click
+import warnings
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
@@ -49,6 +50,39 @@ class TqdmStepCallback(BaseCallback):
             self._bar.close()
 
 
+class ThroughputCallback(BaseCallback):
+    def __init__(self, log_every_rollouts: int = 1):
+        super().__init__()
+        self.log_every_rollouts = log_every_rollouts
+        self._last_timesteps = 0
+        self._last_time = None
+        self._rollouts = 0
+
+    def _on_training_start(self) -> None:
+        import time
+        self._last_time = time.perf_counter()
+        self._last_timesteps = 0
+
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self) -> None:
+        import time
+        self._rollouts += 1
+        if self._rollouts % self.log_every_rollouts != 0:
+            return
+        now = time.perf_counter()
+        delta_t = max(now - self._last_time, 1e-9)
+        delta_steps = self.model.num_timesteps - self._last_timesteps
+        fps = delta_steps / delta_t
+        print(
+            f"[rollout {self._rollouts:04d}] "
+            f"{delta_steps:,} steps in {delta_t:.1f}s -> {fps:.1f} fps"
+        )
+        self._last_time = now
+        self._last_timesteps = self.model.num_timesteps
+
+
 @click.command()
 @click.option("--total-steps",    default=5_000_000, show_default=True)
 @click.option("--n-envs",         default=4, show_default=True)
@@ -75,9 +109,23 @@ class TqdmStepCallback(BaseCallback):
     type=click.Choice(["auto", "cuda", "mps", "cpu"]),
     show_default=True,
 )
-def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_prices, vec_env, device, env_device):
+@click.option(
+    "--benchmark",
+    is_flag=True,
+    help="Run a short throughput benchmark instead of a full training run.",
+)
+@click.option(
+    "--benchmark-steps",
+    default=100_000,
+    show_default=True,
+    help="Timesteps to use when --benchmark is enabled.",
+)
+def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_prices, vec_env, device, env_device, benchmark, benchmark_steps):
     """Train PPO agent on the LNG terminal environment."""
     from src.environment.lng_terminal_env import LNGTerminalEnv
+
+    if benchmark:
+        total_steps = benchmark_steps
 
     use_surrogate = Path(surrogate).exists()
     if not use_surrogate:
@@ -115,6 +163,8 @@ def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_
         f"Surrogate: {'enabled' if use_surrogate else 'physics simulator'} | "
         f"Vec env: {vec_env_name} | Env device: {resolved_env_device}"
     )
+    if benchmark:
+        print("Benchmark mode enabled: shorter run for fast FPS comparison")
 
     def make_env():
         return LNGTerminalEnv(
@@ -128,6 +178,12 @@ def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_
 
     vec_env  = make_vec_env(make_env, n_envs=n_envs, vec_env_cls=vec_env_cls)
     eval_env = make_vec_env(make_env, n_envs=1, vec_env_cls=eval_vec_env_cls)
+
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Training and eval env are not of the same type.*",
+        module="stable_baselines3.common.callbacks",
+    )
 
     import torch.nn as nn
     model = PPO(
@@ -148,15 +204,19 @@ def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_
 
     callbacks = [
         TqdmStepCallback(total_steps),
+        ThroughputCallback(),
         EvalCallback(
             eval_env,
             best_model_save_path=f"{output_dir}/best",
             log_path=f"{output_dir}/eval_logs",
-            eval_freq=50_000,
+            eval_freq=10_000 if benchmark else 50_000,
             n_eval_episodes=3,
             deterministic=True,
         ),
-        CheckpointCallback(save_freq=200_000, save_path=f"{output_dir}/checkpoints"),
+        CheckpointCallback(
+            save_freq=max(20_000, total_steps // 5) if benchmark else 200_000,
+            save_path=f"{output_dir}/checkpoints",
+        ),
     ]
 
     with mlflow.start_run(run_name="ppo_lng_agent"):
