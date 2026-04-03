@@ -34,8 +34,10 @@ class LNGComposition:
 
     @property
     def wobbe_index(self) -> float:
-        hhv = (890.4 * self.methane + 1559.8 * self.ethane +
-               2220.0 * self.propane) / 1000
+        # Component HHVs in MJ/Sm3 give a terminal-oriented Wobbe index
+        # in the typical natural-gas range (~40-60 MJ/Sm3).
+        hhv = (39.8 * self.methane + 69.5 * self.ethane +
+               93.0 * self.propane)
         sg  = (16.04 * self.methane + 30.07 * self.ethane +
                44.10 * self.propane + 28.01 * self.nitrogen) / 28.96
         return hhv / (sg ** 0.5)
@@ -50,6 +52,11 @@ def compute_bog_rate_physics(
     latent_heat_kJ_kg = composition.latent_heat_kJ_kg
     pressure_factor = 1.0 - 0.01 * (tank_pressure_kPa - 5.0)
     pressure_factor = max(0.5, min(1.5, pressure_factor))
-    bog_rate_kw = heat_ingress_kW * pressure_factor
+    # Only part of the terminal heat leak produces net boil-off. The rest warms
+    # tank internals, liquid bulk, and vapor space. This factor calibrates the
+    # first-principles estimate to the expected 100-400 kg/h range for the
+    # FSRU-scale heat ingress used in this project.
+    net_evaporation_fraction = 0.22
+    bog_rate_kw = heat_ingress_kW * pressure_factor * net_evaporation_fraction
     bog_rate_kg_s = bog_rate_kw / latent_heat_kJ_kg
     return bog_rate_kg_s * 3600
