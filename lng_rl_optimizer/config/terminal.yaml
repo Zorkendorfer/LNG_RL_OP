@@ -1,0 +1,53 @@
+terminal:
+  name: "Klaipėda FSRU Independence (model)"
+  type: FSRU
+
+tanks:
+  n_tanks: 4
+  total_capacity_m3: 170000
+  working_capacity_m3: 155000
+  min_level_m3: 17000
+  design_pressure_kPa: 25.0
+  max_pressure_kPa: 22.0
+  min_pressure_kPa: 2.0
+  heat_ingress_kW: 180.0
+
+bog_compressors:
+  n_units: 3
+  capacity_kg_per_h: [8000, 8000, 8000]
+  power_kW: [1200, 1200, 1200]
+  min_load_fraction: 0.3
+  startup_time_min: 15
+  wear_cost_per_start: 500.0
+
+lp_pumps:
+  n_units: 6
+  flow_m3_per_h: [300, 300, 300, 300, 300, 300]
+  head_m: 50.0
+  efficiency: 0.72
+  power_kW: [55, 55, 55, 55, 55, 55]
+
+hp_pumps:
+  n_units: 4
+  flow_m3_per_h: [150, 150, 150, 150]
+  design_pressure_bar: 80.0
+  power_kW: [450, 450, 450, 450]
+
+vaporizers:
+  type: ORV
+  n_units: 4
+  capacity_t_per_h: [100, 100, 100, 100]
+  seawater_flow_m3_per_h: 3000
+  seawater_pump_kW: 185
+  min_seawater_temp_C: 4.0
+  fouling_factor_initial: 0.0
+
+send_out:
+  max_rate_t_per_h: 400
+  min_rate_t_per_h: 20
+  nominal_pressure_bar: 70.0
+
+grid:
+  voltage_kV: 110
+  connection: "Klaipėda substation"
+  max_import_MW: 15.0
