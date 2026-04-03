@@ -51,7 +51,9 @@ class LNGTerminalEnv(gym.Env):
         # Load PINN surrogate or physics sim
         self.use_surrogate = use_surrogate
         if use_surrogate and Path(surrogate_path).exists():
-            checkpoint = torch.load(surrogate_path, map_location="cpu")
+            checkpoint = torch.load(
+                surrogate_path, map_location="cpu", weights_only=False
+            )
             self.surrogate = TerminalPINN()
             self.surrogate.load_state_dict(checkpoint["model_state"])
             self.surrogate.eval()
@@ -211,7 +213,8 @@ class LNGTerminalEnv(gym.Env):
         with torch.no_grad():
             pred = self.surrogate.predict_physical(x_t.unsqueeze(0)).squeeze(0).numpy()
 
-        bog_gen, comp_power, total_power, cost, new_pressure, new_fill = pred
+        bog_gen, comp_power, total_power, new_pressure, new_fill = pred
+        cost = float(total_power) * self.state.electricity_price_eur_mwh / 1000.0
 
         new_state = copy.deepcopy(self.state)
         new_state.tank_pressure_kPa    = float(np.clip(new_pressure, 0, 25))

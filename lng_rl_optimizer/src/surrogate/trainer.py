@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from .pinn import TerminalPINN, physics_consistency_loss
+from src.utils.device import resolve_torch_device
+from tqdm.auto import tqdm
 
 
 INPUT_COLS = [
@@ -16,7 +18,7 @@ INPUT_COLS = [
 ]
 OUTPUT_COLS = [
     "bog_gen_kg_h", "comp_power_kW", "total_power_kW",
-    "cost_eur_h", "new_pressure_kPa", "new_fill_fraction",
+    "new_pressure_kPa", "new_fill_fraction",
 ]
 
 
@@ -29,8 +31,9 @@ def train_surrogate(
     epochs: int = 200,
     batch_size: int = 1024,
     physics_weight: float = 0.5,
-    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    device: str = "auto",
 ) -> TerminalPINN:
+    device = resolve_torch_device(device)
 
     dfs = [pd.read_parquet(p) for p in sorted(data_dir.glob("*.parquet"))]
     df  = pd.concat(dfs, ignore_index=True)
@@ -62,16 +65,32 @@ def train_surrogate(
     best_val_loss = float("inf")
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    print(
+        f"Training surrogate on {len(df):,} samples "
+        f"({n_train:,} train / {n - n_train:,} val) using {device}"
+    )
+    print(
+        f"Model: hidden_dim={hidden_dim}, n_layers={n_layers}, "
+        f"batch_size={batch_size}, epochs={epochs}"
+    )
+
     with mlflow.start_run(run_name="pinn_surrogate"):
         mlflow.log_params({
             "hidden_dim": hidden_dim, "n_layers": n_layers,
             "physics_weight": physics_weight, "n_train": n_train,
         })
 
-        for epoch in range(epochs):
+        epoch_bar = tqdm(range(epochs), desc="Surrogate epochs", unit="epoch")
+        for epoch in epoch_bar:
             model.train()
             train_loss = 0.0
-            for xb, yb in train_loader:
+            batch_bar = tqdm(
+                train_loader,
+                desc=f"Epoch {epoch + 1}/{epochs}",
+                unit="batch",
+                leave=False,
+            )
+            for xb, yb in batch_bar:
                 xb, yb = xb.to(device), yb.to(device)
                 yb_norm = (yb - model.out_mean) / model.out_std
                 pred = model(xb)
@@ -85,6 +104,11 @@ def train_surrogate(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 train_loss += loss.item()
+                batch_bar.set_postfix(
+                    loss=f"{loss.item():.4f}",
+                    data=f"{data_loss.item():.4f}",
+                    phys=f"{physics_loss.item():.4f}",
+                )
 
             scheduler.step()
 
@@ -106,6 +130,12 @@ def train_surrogate(
                 "val_rel_l2": rel_l2,
             }, step=epoch)
 
+            epoch_bar.set_postfix(
+                train=f"{train_loss / len(train_loader):.4f}",
+                val=f"{val_loss:.4f}",
+                rel_l2=f"{rel_l2:.4f}",
+            )
+
             if epoch % 20 == 0:
                 print(f"Epoch {epoch:03d} | val_loss={val_loss:.4f} | "
                       f"val_rel_l2={rel_l2:.4f}")
@@ -118,6 +148,10 @@ def train_surrogate(
                     "x_std":  x_std.values,
                     "input_cols": INPUT_COLS,
                 }, output_dir / "best_pinn.pt")
+                print(
+                    f"  New best checkpoint saved: val_loss={val_loss:.4f}, "
+                    f"val_rel_l2={rel_l2:.4f}"
+                )
 
     print(f"\nBest val loss: {best_val_loss:.4f}")
     print(f"Target: val_rel_l2 < 0.03 (3% error)")

@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
+from src.utils.device import resolve_torch_device
+from tqdm.auto import tqdm
 
 
 class PriceForecaster(nn.Module):
@@ -65,10 +67,11 @@ def train_forecaster(
     epochs: int = 50,
     lr: float = 1e-3,
     batch_size: int = 256,
-    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    device: str = "auto",
 ) -> PriceForecaster:
     """Train and save the price forecaster."""
     from torch.utils.data import DataLoader, TensorDataset
+    device = resolve_torch_device(device)
 
     X, y = prepare_price_features(prices_df)
     n = len(X)
@@ -82,22 +85,40 @@ def train_forecaster(
     model = PriceForecaster().to(device)
     opt   = torch.optim.Adam(model.parameters(), lr=lr)
 
+    print(
+        f"Training price forecaster on {n:,} windows "
+        f"({n_train:,} train / {n - n_train:,} val) using {device}"
+    )
+    print(
+        f"Lookback=168h, horizon=24h, batch_size={batch_size}, epochs={epochs}"
+    )
+
     best_val = float("inf")
-    for epoch in range(epochs):
+    epoch_bar = tqdm(range(epochs), desc="Forecaster epochs", unit="epoch")
+    for epoch in epoch_bar:
         model.train()
-        for xb, yb in loader:
+        batch_bar = tqdm(
+            loader,
+            desc=f"Epoch {epoch + 1}/{epochs}",
+            unit="batch",
+            leave=False,
+        )
+        for xb, yb in batch_bar:
             xb, yb = xb.to(device), yb.to(device)
             loss = nn.functional.mse_loss(model(xb), yb)
             opt.zero_grad(); loss.backward(); opt.step()
+            batch_bar.set_postfix(loss=f"{loss.item():.4f}")
 
         model.eval()
         with torch.no_grad():
             val_loss = nn.functional.mse_loss(
                 model(X_val.to(device)), y_val.to(device)
             ).item()
+        epoch_bar.set_postfix(val_loss=f"{val_loss:.4f}")
         if val_loss < best_val:
             best_val = val_loss
             torch.save(model.state_dict(), output_path)
+            print(f"  New best checkpoint saved: val_loss={val_loss:.4f}")
         if epoch % 10 == 0:
             print(f"Epoch {epoch:03d} val_loss={val_loss:.4f}")
 

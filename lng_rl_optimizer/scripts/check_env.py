@@ -10,7 +10,16 @@ def check_imports():
     print("Checking imports...")
     import numpy; print(f"  numpy {numpy.__version__}")
     import pandas; print(f"  pandas {pandas.__version__}")
-    import torch; print(f"  torch {torch.__version__} | CUDA: {torch.cuda.is_available()}")
+    import torch
+    mps_ok = (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+        and torch.backends.mps.is_built()
+    )
+    print(
+        f"  torch {torch.__version__} | CUDA: {torch.cuda.is_available()} "
+        f"| MPS: {mps_ok}"
+    )
     import gymnasium; print(f"  gymnasium {gymnasium.__version__}")
     import yaml; print("  pyyaml OK")
     import mlflow; print(f"  mlflow {mlflow.__version__}")

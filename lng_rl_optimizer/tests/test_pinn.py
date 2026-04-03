@@ -10,7 +10,7 @@ def test_pinn_output_shape():
     model = TerminalPINN()
     x = torch.randn(8, 14)
     out = model(x)
-    assert out.shape == (8, 6)
+    assert out.shape == (8, 5)
 
 
 def test_pinn_predict_physical_nonnegative():

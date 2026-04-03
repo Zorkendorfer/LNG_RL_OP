@@ -15,7 +15,13 @@ from src.market.price_forecaster import train_forecaster
 @click.option("--output",     default="runs/price_forecaster.pt")
 @click.option("--epochs",     default=50, show_default=True)
 @click.option("--synthetic",  is_flag=True, help="Use synthetic prices if real data unavailable")
-def main(price_dir, output, epochs, synthetic):
+@click.option(
+    "--device",
+    default="auto",
+    type=click.Choice(["auto", "cuda", "mps", "cpu"]),
+    show_default=True,
+)
+def main(price_dir, output, epochs, synthetic, device):
     Path(output).parent.mkdir(parents=True, exist_ok=True)
 
     if synthetic:
@@ -24,7 +30,9 @@ def main(price_dir, output, epochs, synthetic):
     else:
         prices_df = load_and_clean_prices(Path(price_dir))
 
-    model = train_forecaster(prices_df, output_path=output, epochs=epochs)
+    model = train_forecaster(
+        prices_df, output_path=output, epochs=epochs, device=device
+    )
     print(f"Price forecaster saved to {output}")
 
 

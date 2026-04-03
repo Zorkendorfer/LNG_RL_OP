@@ -18,7 +18,13 @@ from src.surrogate.trainer import train_surrogate
 @click.option("--batch-size",    default=1024, show_default=True)
 @click.option("--lr",            default=3e-4, show_default=True)
 @click.option("--physics-weight", default=0.5, show_default=True)
-def main(data_dir, output_dir, hidden_dim, n_layers, epochs, batch_size, lr, physics_weight):
+@click.option(
+    "--device",
+    default="auto",
+    type=click.Choice(["auto", "cuda", "mps", "cpu"]),
+    show_default=True,
+)
+def main(data_dir, output_dir, hidden_dim, n_layers, epochs, batch_size, lr, physics_weight, device):
     """Train PINN surrogate on physics simulator trajectories."""
     model = train_surrogate(
         data_dir=Path(data_dir),
@@ -29,6 +35,7 @@ def main(data_dir, output_dir, hidden_dim, n_layers, epochs, batch_size, lr, phy
         batch_size=batch_size,
         lr=lr,
         physics_weight=physics_weight,
+        device=device,
     )
     print(f"Surrogate saved to {output_dir}/best_pinn.pt")
 

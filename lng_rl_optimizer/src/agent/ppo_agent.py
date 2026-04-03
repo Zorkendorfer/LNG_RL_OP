@@ -4,16 +4,23 @@ Training is done via scripts/train_agent.py.
 """
 from stable_baselines3 import PPO
 from pathlib import Path
+from src.utils.device import resolve_torch_device
 
 
 def load_agent(model_path: str) -> PPO:
     return PPO.load(model_path)
 
 
-def make_ppo(env, lr: float = 3e-4, batch_size: int = 2048) -> PPO:
+def make_ppo(
+    env,
+    lr: float = 3e-4,
+    batch_size: int = 2048,
+    device: str = "auto",
+) -> PPO:
     return PPO(
         "MlpPolicy",
         env,
+        device=resolve_torch_device(device),
         learning_rate=lr,
         n_steps=2048,
         batch_size=batch_size,

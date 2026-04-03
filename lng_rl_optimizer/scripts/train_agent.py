@@ -8,8 +8,44 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import click
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 import mlflow
+from src.utils.device import resolve_torch_device
+from tqdm.auto import tqdm
+
+
+class TqdmStepCallback(BaseCallback):
+    def __init__(self, total_timesteps: int):
+        super().__init__()
+        self.total_timesteps = total_timesteps
+        self._bar = None
+
+    def _on_training_start(self) -> None:
+        self._bar = tqdm(
+            total=self.total_timesteps,
+            desc="PPO training",
+            unit="step",
+        )
+
+    def _on_step(self) -> bool:
+        if self._bar is not None:
+            delta = self.model.num_timesteps - self._bar.n
+            if delta > 0:
+                self._bar.update(delta)
+                if len(self.model.ep_info_buffer) > 0:
+                    last = self.model.ep_info_buffer[-1]
+                    reward = last.get("r")
+                    length = last.get("l")
+                    if reward is not None and length is not None:
+                        self._bar.set_postfix(
+                            ep_reward=f"{reward:.2f}",
+                            ep_len=int(length),
+                        )
+        return True
+
+    def _on_training_end(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
 
 
 @click.command()
@@ -20,13 +56,29 @@ import mlflow
 @click.option("--output-dir",     default="runs/agent")
 @click.option("--surrogate",      default="runs/surrogate/best_pinn.pt")
 @click.option("--synthetic-prices", is_flag=True)
-def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_prices):
+@click.option(
+    "--device",
+    default="auto",
+    type=click.Choice(["auto", "cuda", "mps", "cpu"]),
+    show_default=True,
+)
+def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_prices, device):
     """Train PPO agent on the LNG terminal environment."""
     from src.environment.lng_terminal_env import LNGTerminalEnv
 
     use_surrogate = Path(surrogate).exists()
     if not use_surrogate:
         print(f"Warning: surrogate not found at {surrogate}, using physics sim")
+    resolved_device = resolve_torch_device(device)
+    print(f"Using torch device: {resolved_device}")
+    print(
+        f"Training PPO for {total_steps:,} steps with {n_envs} envs, "
+        f"batch_size={batch_size}, lr={lr}"
+    )
+    print(
+        f"Price source: {'synthetic' if synthetic_prices else 'data/nordpool/raw'} | "
+        f"Surrogate: {'enabled' if use_surrogate else 'physics simulator'}"
+    )
 
     def make_env():
         return LNGTerminalEnv(
@@ -42,6 +94,7 @@ def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_
     import torch.nn as nn
     model = PPO(
         "MlpPolicy", vec_env,
+        device=resolved_device,
         learning_rate=lr,
         n_steps=2048,
         batch_size=batch_size,
@@ -56,6 +109,7 @@ def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_
     )
 
     callbacks = [
+        TqdmStepCallback(total_steps),
         EvalCallback(
             eval_env,
             best_model_save_path=f"{output_dir}/best",
@@ -70,7 +124,7 @@ def train(total_steps, n_envs, lr, batch_size, output_dir, surrogate, synthetic_
     with mlflow.start_run(run_name="ppo_lng_agent"):
         mlflow.log_params({
             "total_steps": total_steps, "n_envs": n_envs,
-            "lr": lr, "batch_size": batch_size,
+            "lr": lr, "batch_size": batch_size, "device": resolved_device,
         })
         model.learn(total_timesteps=total_steps, callback=callbacks)
         model.save(f"{output_dir}/final_model")

@@ -14,9 +14,9 @@ class TerminalPINN(nn.Module):
                 n_hp_pumps (normalized), n_vaporizers (normalized),
                 send_out_rate (normalized)
 
-    Outputs (6):
+    Outputs (5):
         bog_gen_kg_h, comp_power_kW, total_power_kW,
-        cost_eur_h, new_pressure, new_fill
+        new_pressure, new_fill
     """
 
     def __init__(
@@ -24,7 +24,7 @@ class TerminalPINN(nn.Module):
         input_dim:  int = 14,
         hidden_dim: int = 256,
         n_layers:   int = 6,
-        output_dim: int = 6,
+        output_dim: int = 5,
         dropout:    float = 0.05,
     ):
         super().__init__()
@@ -39,10 +39,10 @@ class TerminalPINN(nn.Module):
         self.head = nn.Linear(hidden_dim, output_dim)
 
         self.register_buffer("out_mean", torch.tensor([
-            200.0, 1500.0, 2500.0, 125.0, 10.0, 0.5,
+            200.0, 1500.0, 2500.0, 10.0, 0.5,
         ]))
         self.register_buffer("out_std", torch.tensor([
-            150.0, 800.0, 1200.0, 100.0, 5.0, 0.2
+            150.0, 800.0, 1200.0, 5.0, 0.2
         ]))
 
     def forward(self, x: Tensor) -> Tensor:
@@ -51,7 +51,7 @@ class TerminalPINN(nn.Module):
     def predict_physical(self, x: Tensor) -> Tensor:
         raw = self.forward(x)
         physical = raw * self.out_std + self.out_mean
-        physical = torch.clamp(physical, min=torch.zeros(6, device=x.device))
+        physical = torch.clamp(physical, min=torch.zeros(5, device=x.device))
         return physical
 
 
@@ -64,13 +64,12 @@ def physics_consistency_loss(
     bog_gen     = pred[:, 0]
     comp_power  = pred[:, 1]
     total_power = pred[:, 2]
-    cost        = pred[:, 3]
     price       = inputs[:, 7]
     send_out    = inputs[:, 13] * 400
 
     c1 = torch.relu(comp_power - total_power)
     cost_physics = total_power * price / 1000
-    c2 = (cost - cost_physics).pow(2)
+    c2 = torch.relu(cost_physics - total_power * 0.6)
     c3 = torch.relu(-bog_gen)
     c4 = torch.relu(-comp_power)
     min_power_when_running = 200.0
